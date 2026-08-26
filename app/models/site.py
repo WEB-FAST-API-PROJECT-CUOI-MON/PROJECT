@@ -31,6 +31,7 @@ class Site(Base):
 
     members = relationship("SiteMember", back_populates="site", cascade="all, delete-orphan")
     work_items = relationship("WorkItem", back_populates="site", cascade="all, delete-orphan")
+    teams = relationship("Team", back_populates="site", cascade="all, delete-orphan")
 
 
 class SiteMember(Base):

@@ -21,6 +21,11 @@ def _reset_rate_limit():
     yield
 
 
+def _data(r):
+    """Mọi response API đều bọc trong envelope 6 trường chuẩn — lấy phần `data` thực sự."""
+    return r.json()["data"]
+
+
 def _unique_email() -> str:
     return f"user_{uuid.uuid4().hex[:10]}@example.com"
 
@@ -43,7 +48,7 @@ def test_register_success():
     email = _unique_email()
     r = _register(email)
     assert r.status_code == 201
-    body = r.json()
+    body = _data(r)
     assert body["email"] == email
     assert body["role"] == "USER"
     assert body["is_active"] is True
@@ -69,6 +74,7 @@ def test_register_password_too_short():
 def test_login_success_returns_access_and_refresh_token():
     r = _login("admin@example.com", "admin123")
     assert r.status_code == 200
+    # /auth/login là token endpoint chuẩn OAuth2 -> không bọc envelope, đọc thẳng r.json()
     body = r.json()
     assert body["token_type"] == "bearer"
     assert body["access_token"]
@@ -100,7 +106,7 @@ def test_get_current_user():
     token = _login("admin@example.com", "admin123").json()["access_token"]
     r = client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
-    body = r.json()
+    body = _data(r)
     assert body["email"] == "admin@example.com"
     assert "password_hash" not in body
 
@@ -113,14 +119,14 @@ def test_get_current_user_without_token():
 def test_get_current_user_invalid_token():
     r = client.get("/users/me", headers={"Authorization": "Bearer not-a-real-token"})
     assert r.status_code == 401
-    assert "hết hạn" not in r.json()["error"]["message"]
+    assert "hết hạn" not in r.json()["message"]
 
 
 def test_get_current_user_expired_token():
     expired = create_access_token({"sub": "admin@example.com"}, expires_delta=timedelta(seconds=-1))
     r = client.get("/users/me", headers={"Authorization": f"Bearer {expired}"})
     assert r.status_code == 401
-    assert "hết hạn" in r.json()["error"]["message"]
+    assert "hết hạn" in r.json()["message"]
 
 
 # --- Role guard / danh sách user ---
@@ -138,14 +144,15 @@ def test_list_users_as_admin_with_search_and_status_filter():
 
     r = client.get("/users", params={"search": "worker1"}, headers=headers)
     assert r.status_code == 200
-    emails = [u["email"] for u in r.json()]
+    emails = [u["email"] for u in _data(r)]
     assert "worker1@example.com" in emails
 
     r = client.get("/users", params={"is_active": False}, headers=headers)
     assert r.status_code == 200
-    emails = [u["email"] for u in r.json()]
+    users = _data(r)
+    emails = [u["email"] for u in users]
     assert "inactive@example.com" in emails
-    assert all(u["is_active"] is False for u in r.json())
+    assert all(u["is_active"] is False for u in users)
 
 
 # --- Refresh token ---

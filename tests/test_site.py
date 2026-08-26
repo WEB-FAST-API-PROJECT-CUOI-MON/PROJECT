@@ -17,6 +17,11 @@ def _reset_rate_limit():
     yield
 
 
+def _data(r):
+    """Mọi response API đều bọc trong envelope 6 trường chuẩn — lấy phần `data` thực sự."""
+    return r.json()["data"]
+
+
 def _unique_email() -> str:
     return f"user_{uuid.uuid4().hex[:10]}@example.com"
 
@@ -29,10 +34,11 @@ def _register_and_login(password: str = "password123") -> tuple[dict, dict]:
         json={"email": email, "password": password, "full_name": "Người Test"},
     )
     assert r.status_code == 201
-    user = r.json()
+    user = _data(r)
 
     r = client.post("/auth/login", data={"username": email, "password": password})
     assert r.status_code == 200
+    # /auth/login là token endpoint chuẩn OAuth2 -> không bọc envelope, đọc thẳng r.json()
     token = r.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}, user
 
@@ -52,13 +58,13 @@ def test_create_site_success_and_becomes_owner():
     headers, user = _register_and_login()
     r = _create_site(headers, name="Chung cư ABC")
     assert r.status_code == 201
-    body = r.json()
+    body = _data(r)
     assert body["name"] == "Chung cư ABC"
     assert body["owner_id"] == user["id"]
 
     r = client.get(f"/construction-sites/{body['id']}/members", headers=headers)
     assert r.status_code == 200
-    members = r.json()
+    members = _data(r)
     assert len(members) == 1
     assert members[0]["role"] == "OWNER"
     assert members[0]["user_id"] == user["id"]
@@ -89,13 +95,13 @@ def test_list_sites_only_returns_owner_or_member():
     other_headers, _ = _register_and_login()
 
     r = _create_site(owner_headers, name="Riêng của owner")
-    site_id = r.json()["id"]
+    site_id = _data(r)["id"]
 
     r = client.get("/construction-sites", headers=owner_headers)
-    assert site_id in [s["id"] for s in r.json()]
+    assert site_id in [s["id"] for s in _data(r)]
 
     r = client.get("/construction-sites", headers=other_headers)
-    assert site_id not in [s["id"] for s in r.json()]
+    assert site_id not in [s["id"] for s in _data(r)]
 
 
 def test_list_sites_search_by_name():
@@ -106,7 +112,7 @@ def test_list_sites_search_by_name():
 
     r = client.get("/construction-sites", params={"search": unique_name[:10]}, headers=headers)
     assert r.status_code == 200
-    names = [s["name"] for s in r.json()]
+    names = [s["name"] for s in _data(r)]
     assert unique_name in names
     assert "Công trình khác" not in names
 
@@ -114,7 +120,7 @@ def test_list_sites_search_by_name():
 def test_get_site_requires_membership():
     owner_headers, _ = _register_and_login()
     other_headers, _ = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.get(f"/construction-sites/{site_id}", headers=other_headers)
     assert r.status_code == 403
@@ -132,7 +138,7 @@ def test_get_site_not_found():
 def test_update_site_owner_only():
     owner_headers, _ = _register_and_login()
     other_headers, other_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     # thêm other_user làm MEMBER (không phải owner)
     client.post(
@@ -146,27 +152,37 @@ def test_update_site_owner_only():
 
     r = client.patch(f"/construction-sites/{site_id}", json={"name": "Tên mới"}, headers=owner_headers)
     assert r.status_code == 200
-    assert r.json()["name"] == "Tên mới"
+    assert _data(r)["name"] == "Tên mới"
+
+
+def test_update_site_via_put_same_as_patch():
+    owner_headers, _ = _register_and_login()
+    site_id = _data(_create_site(owner_headers))["id"]
+
+    r = client.put(f"/construction-sites/{site_id}", json={"name": "Tên qua PUT"}, headers=owner_headers)
+    assert r.status_code == 200
+    assert _data(r)["name"] == "Tên qua PUT"
 
 
 def test_delete_site_soft_delete_hides_it():
     owner_headers, _ = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.delete(f"/construction-sites/{site_id}", headers=owner_headers)
-    assert r.status_code == 204
+    assert r.status_code == 200
+    assert _data(r) is None
 
     r = client.get(f"/construction-sites/{site_id}", headers=owner_headers)
     assert r.status_code == 404
 
     r = client.get("/construction-sites", headers=owner_headers)
-    assert site_id not in [s["id"] for s in r.json()]
+    assert site_id not in [s["id"] for s in _data(r)]
 
 
 def test_delete_site_non_owner_forbidden():
     owner_headers, _ = _register_and_login()
     other_headers, other_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     client.post(
         f"/construction-sites/{site_id}/members",
@@ -184,7 +200,7 @@ def test_delete_site_non_owner_forbidden():
 def test_add_member_success_and_duplicate_rejected():
     owner_headers, _ = _register_and_login()
     _, other_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.post(
         f"/construction-sites/{site_id}/members",
@@ -192,7 +208,7 @@ def test_add_member_success_and_duplicate_rejected():
         headers=owner_headers,
     )
     assert r.status_code == 201
-    assert r.json()["user_id"] == other_user["id"]
+    assert _data(r)["user_id"] == other_user["id"]
 
     r = client.post(
         f"/construction-sites/{site_id}/members",
@@ -204,7 +220,7 @@ def test_add_member_success_and_duplicate_rejected():
 
 def test_add_member_user_not_found():
     owner_headers, _ = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.post(
         f"/construction-sites/{site_id}/members",
@@ -218,7 +234,7 @@ def test_add_member_non_owner_forbidden():
     owner_headers, _ = _register_and_login()
     member_headers, member_user = _register_and_login()
     _, third_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     client.post(
         f"/construction-sites/{site_id}/members",
@@ -237,7 +253,7 @@ def test_add_member_non_owner_forbidden():
 def test_remove_member_success():
     owner_headers, _ = _register_and_login()
     _, member_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     client.post(
         f"/construction-sites/{site_id}/members",
@@ -246,15 +262,16 @@ def test_remove_member_success():
     )
 
     r = client.delete(f"/construction-sites/{site_id}/members/{member_user['id']}", headers=owner_headers)
-    assert r.status_code == 204
+    assert r.status_code == 200
+    assert _data(r) is None
 
     r = client.get(f"/construction-sites/{site_id}/members", headers=owner_headers)
-    assert member_user["id"] not in [m["user_id"] for m in r.json()]
+    assert member_user["id"] not in [m["user_id"] for m in _data(r)]
 
 
 def test_remove_member_not_found():
     owner_headers, _ = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.delete(f"/construction-sites/{site_id}/members/999999999", headers=owner_headers)
     assert r.status_code == 404
@@ -262,7 +279,7 @@ def test_remove_member_not_found():
 
 def test_cannot_remove_last_owner():
     owner_headers, owner_user = _register_and_login()
-    site_id = _create_site(owner_headers).json()["id"]
+    site_id = _data(_create_site(owner_headers))["id"]
 
     r = client.delete(f"/construction-sites/{site_id}/members/{owner_user['id']}", headers=owner_headers)
     assert r.status_code == 400

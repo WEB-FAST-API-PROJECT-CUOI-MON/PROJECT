@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = 5
     LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
+    # File đính kèm cho hạng mục thi công (hình ảnh / biên bản nghiệm thu)
+    WORK_ITEM_UPLOAD_DIR: str = "uploads/work_items"
+    WORK_ITEM_ATTACHMENT_MAX_SIZE_MB: int = 5
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
