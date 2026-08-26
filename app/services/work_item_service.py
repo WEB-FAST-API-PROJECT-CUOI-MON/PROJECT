@@ -243,6 +243,7 @@ def create_work_item_comment(
 # --- Attachment (file đính kèm) ---
 
 
+
 def list_work_item_attachments(db: Session, item_id: int, current_user: User) -> list[WorkItemAttachment]:
     """Danh sách file đính kèm của một hạng mục thi công. Chỉ thành viên công trình được xem."""
     item = get_work_item_or_404(db, item_id)
